@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Voice App - Neon Theme</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: 'Orbitron', sans-serif;
+      background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+      color: #fff;
+    }
+    .section-container {
+      backdrop-filter: blur(15px);
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 20px;
+      box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+      padding: 30px;
+      margin: 40px auto;
+      max-width: 800px;
+      text-align: center;
+    }
+    h1 {
+      font-size: 28px;
+      color: #00ffff;
+      margin-bottom: 20px;
+    }
+    button {
+      margin-top: 20px;
+      padding: 12px 24px;
+      font-size: 16px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      color: #fff;
+      background: linear-gradient(135deg, #00c6ff, #0072ff);
+      transition: all 0.3s ease;
+    }
+    button:hover {
+      background: linear-gradient(135deg, #00e5ff, #00b0ff);
+      box-shadow: 0 0 10px #00ffff;
+    }
+    audio {
+      margin-top: 20px;
+      width: 100%;
+      max-width: 500px;
+    }
+    #audioPlayer,
+    #echoAudioPlayer {
+      display: none;
+    }
+    .echo-container {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px dashed rgba(0, 255, 255, 0.5);
+    }
+    #uploadStatus {
+      word-break: break-word;
+      margin-top: 15px;
+      color: #fff;
+      text-shadow: 0 0 4px #111;
+      font-size: 1.03em;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Section 1: TTS -->
+  <div class="section-container">
+    <h1>🔊 Text-to-Speech Generator</h1>
+    <input type="text" id="textInput" placeholder="Type something...">
+    <button id="submitBtn">Generate Audio</button>
+    <div id="audioPlayer">
+      <audio id="audioElement" controls></audio>
+    </div>
+  </div>
+
+  <!-- Section 2: Echo Bot -->
+  <div class="section-container echo-container">
+    <h1>🎤 Echo Bot</h1>
+    <div>
+      <button id="startRecordBtn">Start Recording</button>
+      <button id="stopRecordBtn" disabled>Stop Recording</button>
+    </div>
+    <div id="echoAudioPlayer">
+      <audio id="echoAudioElement" controls></audio>
+    </div>
+    <div id="uploadStatus"></div>
+  </div>
+
+  <script>
+    // TTS Section
+    document.getElementById("submitBtn").addEventListener("click", async () => {
+      const text = document.getElementById("textInput").value;
+      const response = await fetch("/tts", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ text, voice_id: "en-US-ken", format: "mp3" }),
+      });
+      const data = await response.json();
+      const audioElement = document.getElementById("audioElement");
+      audioElement.src = data.audio_url;
+      document.getElementById("audioPlayer").style.display = "block";
+    });
+
+    // Echo Recorder & Transcribe Section
+    let mediaRecorder;
+    let audioChunks = [];
+    const startBtn = document.getElementById("startRecordBtn");
+    const stopBtn = document.getElementById("stopRecordBtn");
+    const echoAudioPlayer = document.getElementById("echoAudioPlayer");
+    const echoAudioElement = document.getElementById("echoAudioElement");
+    const uploadStatus = document.getElementById("uploadStatus");
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert("🎙️ Your browser does not support audio recording.");
+      startBtn.disabled = true;
+      stopBtn.disabled = true;
+    } else {
+      startBtn.addEventListener("click", async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = event => {
+            if (event.data.size > 0) audioChunks.push(event.data);
+          };
+
+          mediaRecorder.onstop = () => {
+            const blob = new Blob(audioChunks, { type: "audio/webm" });
+            const audioURL = URL.createObjectURL(blob);
+            echoAudioElement.src = audioURL;
+            echoAudioPlayer.style.display = "block";
+            echoAudioElement.play();
+
+            // ---- Upload and Transcribe Logic ----
+            uploadAudioFile(blob);
+          };
+
+          mediaRecorder.start();
+          startBtn.disabled = true;
+          stopBtn.disabled = false;
+        } catch (error) {
+          alert("❌ Unable to access microphone.");
+        }
+      });
+
+      stopBtn.addEventListener("click", () => {
+        if (mediaRecorder && mediaRecorder.state === "recording") {
+          mediaRecorder.stop();
+        }
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      });
+
+      async function uploadAudioFile(blob) {
+        uploadStatus.textContent = "Uploading & transcribing audio…";
+        try {
+          const formData = new FormData();
+          formData.append("audio", blob, "recording.webm");
+          const response = await fetch("/transcribe/file", {
+            method: "POST",
+            body: formData
+          });
+          const data = await response.json();
+          if (data.success) {
+            uploadStatus.textContent = "📝 Transcription: " + data.transcript;
+          } else {
+            uploadStatus.textContent = `❌ Transcribe failed: ${data.error || "Unknown error"}`;
+          }
+        } catch (err) {
+          uploadStatus.textContent = `❌ Upload error: ${err.message}`;
+        }
+      }
+    }
+  </script>
+</body>
+</html>
